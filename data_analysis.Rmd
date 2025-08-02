@@ -1,0 +1,645 @@
+---
+title: "Sql project"
+author: "Stanley Varghese"
+date: "2023-11-25"
+output: html_document
+---
+
+
+### Establish connection
+
+```{r r_packages}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(forcats)
+library(reticulate)
+use_python("C:/Users/stanley varghese/AppData/Local/Programs/Python/Python311/python.exe")
+
+```
+
+```{python python_packages}
+
+import pyodbc
+import pandas as pd
+import os 
+
+```
+
+
+
+```{python connection_pyodbc}
+os.chdir("C:\\Users\\stanley varghese\\OneDrive\\Documents\\R studio\\SQL_Project")
+cn=pyodbc.connect('DRIVER={SQL Server};SERVER=localhost;PORT=1433;DATABASE=CDMS;UID=sa;PWD=MyPass@word')
+
+"""conn = pyodbc.connect('Driver=SQL Server;'
+                      'Server=127.0.0.1'
+                      'Database=CDMS;'
+                      'UID=sa;'
+                      'PWD=MyPass@word;'
+                      'port=1433;'
+                      'Trusted_Connection=yes')"""
+cursor = cn.cursor()
+                  
+
+```
+
+
+
+
+
+```{python table_co2_ppm}
+# read table for co2 emission worldwide
+cursor = cn.cursor()
+
+table1= pd.read_sql("""SELECT Year, Unit , value as emission, Date as date
+FROM CO2world_wide
+WHERE Unit IN ('Parts Per Million') AND Year >1990 
+ORDER BY Year;""", cn) 
+
+cursor.close()
+
+table1.to_csv("./data/query_results/co2_ppm.csv", index= False)
+
+```
+
+
+```{python table_co2_percentage}
+
+cursor = cn.cursor()
+
+table1= pd.read_sql("""SELECT Year, Unit , value as emission, Date as date
+FROM CO2world_wide
+WHERE Unit IN ('Percent') AND Year >1990 
+ORDER BY Year;""", cn) 
+
+cursor.close()
+
+table1.to_csv("./data/query_results/co2_percentage.csv", index= False)
+```
+
+```{python table_surface_temp_average}
+cursor = cn.cursor()
+surfacetemp= pd.read_sql("""SELECT Year, AVG(temp_change) as Temp_change
+FROM surface_change
+WHERE Year > 1985
+GROUP BY year
+ORDER BY year;""", cn) 
+
+cursor.close()
+
+surfacetemp.to_csv("./data/query_results/surface_temp_average.csv", index= False)
+
+```
+
+
+```{python table_average_tempchange_country}
+#using new database extracting tables to csv
+
+cursor = cn.cursor()
+
+surfacetemp= pd.read_sql("select c.Country, Year,AVG(temp_change) as tem_change From surface_change LEFT JOIN country_master  c on c.Country_code = scountry_code WHERE c.Country in ('United States', 'China', 'Japan', 'Germany', 'United Kingdom', 'India', 'France', 'Brazil', 'Italy', 'Canada', 'Australia', 'Spain', 'Netherlands', 'Saudi Arabia', 'Switzerland', 'Argentina') GROUP BY c.Country, Year", cn) 
+
+cursor.close()
+
+surfacetemp.to_csv("./data/query_results/average_tempchange_country.csv", index= False)
+
+```
+
+
+
+ #country - forest area
+```{python table_country_gpd_forest_area_hectre}
+import pyodbc
+import pandas as pd
+
+ #country - forest area
+cn=pyodbc.connect('DRIVER={SQL Server};SERVER=localhost;PORT=1433;DATABASE=CDMS;UID=sa;PWD=MyPass@word')
+
+cursor = cn.cursor()
+
+surfacetemp= pd.read_sql("""select c.country ,forest_change.Indicator,AVG(emission) as emission, Sum(g.value)/1000 as gdp_value
+from forest_change
+LEFT JOIN country_master c on c.country_code = fcountry_code
+LEFT JOIN GDP_VALUE g on g.GCOUNTRY_CODE = fcountry_code
+where forest_change.Indicator In ('Forest area')
+AND
+c.Country IN (
+        'United States', 'China', 'Japan', 'Germany', 'United Kingdom', 
+        'India', 'France', 'Brazil', 'Italy', 'Canada', 'Australia', 
+        'Spain', 'Netherlands', 'Saudi Arabia')
+GROUP BY forest_change.Indicator,c.country
+ORDER BY gdp_value
+""", cn)
+
+
+cursor.close()
+
+surfacetemp.to_csv("./data/query_results/country_gpd_forest_area_hectre.csv", index= False)
+
+```
+
+
+
+
+
+ #forest VS country - gas - surface area
+```{python table_emission_gastype_region}
+
+cursor = cn.cursor()
+df_gastype_region= pd.read_sql("""SELECT  country  ,gastype, Year,SUM(emission) as emission
+FROM greenhouse
+WHERE country IN('Asia','Africa','Americas','Europe','G20','Southern Europe','Advanced Economies','Australia and New Zealand','G7','Southern Asia','Northern America')
+GROUP BY country ,gastype, Year;""", cn)
+cursor.close()
+df_gastype_region.to_csv("./data/query_results/emmision_gastype_region.csv", index= False)
+
+```
+
+```{python table_Country_level_Industry_wise_emission}
+
+cursor = cn.cursor()
+
+surfacetemp= pd.read_sql("""
+
+SELECT c.Country,i.industry, Year, AVG(Value) as Emission
+--FROM country_master as i
+FROM CO2country_industry
+LEFT JOIN country_master as c ON c.country_code = CO2country_code
+LEFT JOIN industry_master as i ON i.industry_code = co2Industry_code
+WHERE c.Country IS NOT NULL
+AND i.industry IN ('Agriculture, Forestry and Fishing','Construction',
+'Electricity, gas, steam and air conditioning supply','Manufacturing','Mining',
+'Transportation and Storage','Food products, beverages and tobacco','Air transport','Chemicals and pharmaceutical products',
+'Water transport','Rubber and plastics products')
+AND unit IN ('Metric Tons of CO2 Emissions per $1million USD of output')
+GROUP BY c.Country, i.industry, Year
+ORDER BY Emission desc;
+""", cn)
+
+
+cursor.close()
+
+surfacetemp.to_csv("./data/query_results/Country_industry_emission.csv", index= False)
+
+```
+
+
+```{python table_T_test_data}
+cursor = cn.cursor()
+
+df_gastype_region= pd.read_sql("""WITH GDP_Ranking AS (SELECT GCOUNTRY_CODE,
+   RANK() OVER (ORDER BY SUM(GDP_VALUE.value) DESC) AS GDP_Rank
+FROM
+   GDP_VALUE 
+   GROUP BY
+    GCOUNTRY_CODE)
+
+SELECT C.Country, GDP_VALUE.GCOUNTRY_CODE,  SUM(GDP_VALUE.value) / 10 AS gdp_value,SUM(co2country_industry.[Value]) AS Co2_emission,
+CASE
+ WHEN GDP_Rank <= 14 THEN 'HighGDP'
+  ELSE 'LowGDP'
+  END AS GDP_Group
+  FROM
+ GDP_VALUE
+LEFT JOIN country_master C ON C.Country_code = GDP_VALUE.GCOUNTRY_CODE
+LEFT JOIN co2country_industry ON co2country_industry.co2country_code = GDP_VALUE.GCOUNTRY_CODE
+LEFT JOIN GDP_Ranking ON GDP_VALUE.GCOUNTRY_CODE = GDP_Ranking.GCOUNTRY_CODE
+WHERE
+    C.Country IS NOT NULL
+GROUP BY
+    C.Country, GDP_VALUE.GCOUNTRY_CODE, GDP_Rank
+ORDER BY
+   gdp_value DESC;""", cn)
+cursor.close()
+df_gastype_region.to_csv("./data/query_results/T_test_data.csv", index= False)
+
+
+
+
+```
+
+
+
+
+
+```{python table_creation_template}
+import pyodbc
+import pandas as pd
+# creating table using python in SQL - using Pyodbc
+cn=pyodbc.connect('DRIVER={SQL Server};SERVER=localhost;PORT=1433;DATABASE=CDMS;UID=sa;PWD=MyPass@word')
+
+cursor = cn.cursor()
+
+cursor.execute("""CREATE TABLE Python_GDP
+(
+    INDUSTRY_CODE VARCHAR(6),   						
+    INDICATOR VARCHAR(6),
+    SUBJECT VARCHAR(6),
+    FREQUENCY VARCHAR(6),
+    TIME INTEGER
+    CONSTRAINT PK_Python_GDP PRIMARY KEY (INDUSTRY_CODE)
+);""")
+cursor.close()
+#cn.commit()
+#cn.close()
+
+
+
+```
+
+
+
+
+```{r Monthly_Atmospheric_Carbon_Dioxide_Concentrations_PPM,echo=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(kableExtra)
+library(stringr)
+library(ggridges)
+library(ggthemes)
+library(patchwork)
+library(scales)
+library(superml)
+library(corrplot)
+
+
+co2con <- read.csv("./data/query_results/co2world_yearcsv") %>% 
+  mutate(
+    year = as.character(year),
+    date = as.character(date),
+    Year_m = paste(year, date, sep = "_")
+  )
+
+p <- ggplot(co2con, aes(x = Year_m, y = emission, group = 1)) +
+  geom_line(color = "#379B98", size = .9) +
+  geom_point(color = "black", size = 2, fill = "yellow", shape = 21) +
+  theme_minimal() +
+  scale_x_discrete(breaks = c("2010_1", "2012_1", "2014_1", "2016_1","2018_1","2020_1","2022_1")) +
+  labs(
+    title = "Monthly Atmospheric Carbon Dioxide Concentrations",
+    subtitle = "Month on Month Growth Rate",
+    x = "Year and Date",
+    y = "CO2 Concentration (ppm)",
+    caption = "Scripps Institution of Oceanography- IMF"
+  ) +
+  theme(
+    panel.grid.minor = element_blank(), 
+    axis.text.x = element_text(angle = 45, hjust = 1)  
+  )
+
+print(p)
+
+
+```
+
+
+
+```{r Monthly_Atmospheric_Carbon_Dioxide_percentage,warning=FALSE,echo=FALSE}
+percent <- read.csv("./data/query_results/co2_percentage.csv") %>%
+  filter(Year >1990) %>% 
+  mutate(
+    year = as.integer(Year),
+    date = as.integer(date),
+    Year_m = paste(year, date, sep = "_")
+  )
+g <- ggplot(percent, aes(x = Year_m, y = emission, group = 1)) +
+  geom_line(color = "#379B98", size =1) +
+  geom_point(color = "black", size = 2, fill = "yellow", shape = 21) +
+  geom_smooth(method = "lm", se = FALSE, color = "blue", size = 1,linetype="dashed")+
+  theme_minimal() +
+  scale_x_discrete(breaks = c("1990_1","1992_1","1994_1","1996_1","1998_1", "2000_1", "2002_1", "2004_1","2006_1","2008_1","2010_1","2012_1", "2014_1", "2016_1","2018_1","2020_1")) +
+  labs(
+    title = "Monthly Atmospheric Carbon Dioxide Concentrations",
+    subtitle = "Year on Year Growth Rate",
+    x = "Month on Month",
+    y = "Percent change",
+    caption = "Scripps Institution of Oceanography - IMF"
+  ) +
+  theme(
+    panel.grid.minor = element_blank(), 
+    axis.text.x = element_text(angle = 45, hjust = 1)  
+  )
+
+print(g)
+```
+
+
+```{r Average_Temperature_Change_Over_Years_line,echo=FALSE,warning=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(kableExtra)
+library(stringr)
+library(ggridges)
+library(ggthemes)
+library(patchwork)
+library(scales)
+library(superml)
+library(corrplot)
+
+
+surfacetemp <- read.csv("./data/query_results/surface_temp_average.csv")
+
+g <- ggplot(surfacetemp, aes(x = Year, y = Temp_change, group = 1)) +
+  geom_line(color = "#fd2334", size =.8) +
+  geom_point(color = "black", size = 1.4, fill = "#1f78b4", shape = 21) +
+  geom_smooth(method = "lm", se = FALSE, color = "green", size = .6,linetype="dashed")+
+  theme_minimal() +
+  #scale_x_discrete(breaks = c("1990","1992","1994","1996","1998", "2000", "2002", "2004","2006","2008","2010","2012", "2014", "2016","2018","2020")) +
+  labs(
+    title = "Average Temperature Change Over Years",
+    x = "Year",
+    y = "Average Temperature Change",
+    caption = "International Monetary Fund - IMF"
+  ) 
+
+print(g)
+
+
+
+
+
+```
+```{r Average_Temperature_Change_Over_Years_line2}
+surfacetemp <- read.csv("./data/query_results/surface_temp_average.csv")
+p2 <- ggplot(surfacetemp, aes(x = Year, y = Temp_change)) +
+  geom_bar(stat = "identity", fill = "#b2d989", alpha = 0.8) +  # Aqua color
+  geom_text(aes(label = sprintf("%.2f", Temp_change)),
+            position = position_stack(vjust = 1), color = "black", size = 2) +
+  geom_smooth(method = "lm", se = FALSE, color = "red", size = .8,linetype="dashed")+
+  theme_minimal() +
+  labs(
+    title = "Average Temperature Change Over Years",
+    x = "Year",
+    y = "Average Temperature Change",
+    caption = "International Monetary Fund - IMF"
+  ) +
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+print(p2)
+```
+
+```{r Average_Temperature_Change_Over_Years_top14_countries,echo=FALSE,warning=FALSE}
+
+CountryGDP <- read.csv("./data/query_results/average_tempchange_country.csv")
+p2 <- ggplot(CountryGDP, aes(x = Year, y = tem_change)) +
+  geom_bar(stat = "identity",size = 2, alpha = .9, fill = "#1f7834") +
+  #geom_line(aes(y = avg_temp_change*10 , x = Year), color = "blue", size = .5, group =1) +
+  facet_wrap(~Country, ncol = 5, scales = "free_x")+
+  geom_smooth(method = "lm", se = FALSE, color = "red", size = .7,linetype="dashed")+
+  theme_classic() +
+  labs(
+    title = "Average Temperature Change Over Years in top 14 countries",
+    x = "Year",
+    y = "Temp_change",
+    caption = "International Monetary Fund - IMF"
+  ) +
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+    
+    
+  )
+
+print(p2)
+
+```
+
+
+```{r GDP_forest_area,echo=FALSE,warning=FALSE}
+
+Forest <- Forest %>% mutate("f_change" = (Forest_change - lag(Forest_change))/lag(Forest_change)) %>%
+                     mutate("g_change" = (gdp_value - lag(gdp_value))/lag())
+```
+
+
+```{r G_Test,echo=FALSE,warning=FALSE}
+# library(ggplot2)
+# 
+# Forest <- read.csv("./data/query_results/GDP_FOREST.csv")
+# Forest <- Forest %>% mutate("f_change" = (Forest_change - lag(Forest_change))/lag(Forest_change)) %>%
+#                      mutate("g_change" = (gdp_value - lag(gdp_value))/lag(gdp_value)) %>%
+#                      mutate(g_change = g_change*100) %>%
+#                      filter(f_change<50)
+# 
+# Forest <- Forest %>% 
+#   mutate("f_change" = (Forest_change - min(Forest_change)) / (max(Forest_change) - min(Forest_change))) %>%      mutate("g_change" = (gdp_value - min(gdp_value)) / (max(gdp_value) - min(gdp_value)))
+#  
+# 
+# Forest <- na.omit(Forest)
+# 
+# # Forest$gdp_value <- scale(Forest$gdp_value)
+# # Forest$Forest_change <- scale(Forest$Forest_change)
+# # #Manually set the order of countries based on GDP values
+# # order_countries <- Forest[order(-Forest$gdp_value), ]$country
+# # #Forest$country <- factor(Forest$country, levels = order_countries)
+# 
+# 
+# forest1 <- ggplot(Forest, aes(x = Year, y = g_change, fill = "GDP")) +
+#   #geom_bar(stat = "identity", size = 2, alpha = 0.8, fill = "lightgreen") +
+#   geom_line(aes(y = g_change, x = Year), size = 1, group = 1, color = "#18392b")+ 
+#   geom_line(aes(y = f_change, x = Year), size = 1, group = 1, color = "#0892d0") +
+#   facet_wrap(~country, ncol = 4, scales = "free_x")+
+#   scale_y_continuous(
+#     name = "GDP (MLN_USD)",
+#     sec.axis = sec_axis(~.*1, name = " forest area (1000 HA)",)#breaks =c(-1,0,1,2,3,4,10,20,30,50))
+#   ) +
+#   scale_color_manual(name = "forest area") +
+#   theme_classic() +
+#   labs(
+#     title = "GDP Vs  forest area",
+#     x = "Country",
+#     caption = "International Monetary Fund - IMF"
+#   ) +
+#   theme(
+#     panel.grid.minor = element_blank(),
+#     axis.text.x = element_text(angle = 45, hjust = 1),
+#     legend.position = c(1,1),
+#     legend.background = element_rect(fill = "white", color = "gray")
+#   )
+# 
+# print(forest1)
+
+```
+```{r GDP_forest_area_country,echo=FALSE,warning=FALSE}
+library(ggplot2)
+
+Forest <- read.csv("./data/query_results/GDP_FOREST.csv")
+Forest <- Forest %>% 
+  mutate("f_change" = (Forest_change - lag(Forest_change))/lag(Forest_change)) %>%
+  mutate("g_change" = (gdp_value - lag(gdp_value))/lag(gdp_value)) %>%
+  mutate(g_change = g_change * 100) %>%
+  filter(f_change < 50)
+
+Forest <- Forest %>% 
+  mutate("f_change" = (Forest_change - min(Forest_change)) / (max(Forest_change) - min(Forest_change))) %>%      
+  mutate("g_change" = (gdp_value - min(gdp_value)) / (max(gdp_value) - min(gdp_value)))
+
+Forest <- na.omit(Forest)
+
+forest1 <- ggplot(Forest, aes(x = Year, y = g_change, fill = "GDP")) +
+  geom_line(aes(y = g_change, x = Year, color = "GDP"), size = 1, group = 1) + 
+  geom_line(aes(y = f_change, x = Year, color = "Forest Area"), size = 1, group = 1) +
+  facet_wrap(~country, ncol = 4, scales = "free_x") +
+  scale_y_continuous(
+    name = "GDP",
+    sec.axis = sec_axis(~.*1, name = " Forest Area")
+  ) +
+  scale_color_manual(
+    name = "Legend",
+    values = c("GDP" = "#18392b", "Forest Area" = "#0892d0")
+  ) +
+  scale_fill_manual(
+    name = "Legend",
+    values = c("GDP" = "#18392b", "Forest Area" = "#0892d0")
+  ) +
+  theme_classic() +
+  labs(
+    title = "GDP And Forest Area",
+    x = "Year",
+    caption = "International Monetary Fund - IMF"
+  ) +
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = c(1, 1),
+    legend.background = element_rect(fill = "white", color = "gray")
+  )
+
+print(forest1)
+```
+
+
+
+
+```{r Region_Vs_Gastype_Emission,echo=FALSE,warning=TRUE}
+# region wise gastype - 
+gas <- read.csv("./data/query_results/emmision_gastype_region.csv")
+
+# Create the ggplot
+p2 <- gas %>% 
+ filter(!(country %in% c('G20', 'G7','Advanced Economies'))) %>%
+    arrange(desc(emission)) %>%
+
+  ggplot(aes(x = reorder(country, -emission), y = emission/100, fill = gastype)) +
+  geom_bar(stat = "identity", size = 2, alpha = 0.9, group = 1) +
+  #facet_wrap(~gastype, ncol = 2, scales = "free_x") +
+  scale_y_continuous(
+    breaks = seq(0, 15000, length.out = 11),
+    labels = seq(0, 15000, length.out = 11)
+  ) +
+  theme_minimal() +
+  labs(
+    title = "Region Vs Gastype Emission",
+    x = "Region",
+    y = "Emission in Metric Ton",
+    caption = "International Monetary Fund - IMF"
+  ) +
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+print(p2)
+
+
+```
+
+```{r country_industry_Plot,warning=FALSE,echo=FALSE,message=FALSE}
+
+
+# Industry <- read.csv("./data/query_results/Country_industry_emission.csv")
+# 
+# # Create the ggplot
+# emi <-Industry  %>% 
+#  filter(Country %in% c('United States', 'China', 'Japan', 'Germany', 'United Kingdom', 'India', 'France'))
+#  ggplot(emi, aes(x = Year, y = Emission/100, fill = industry)) +
+#   geom_bar(stat = "identity", size = .1, alpha = 0.9) +
+#   facet_wrap(~Country, ncol = 2, scales = "free_x") +
+#    scale_x_continuous(breaks = seq(1995, 2020, by = 2)) +
+#   scale_y_continuous(
+#     breaks = seq(0, 5000, by = 100)
+#   ) +
+#   theme_classic() +
+#   labs(
+#     title = "Industry Vs Country",
+#     x = "year",
+#     y = "Emission",
+#     caption = "International Monetary Fund - IMF"
+#   ) +
+#   theme(
+#     panel.grid.minor = element_blank(),
+#     axis.text.x = element_text(angle = 45, hjust = 1)
+#   )
+# 
+# print(emi)
+Industry <- read.csv("./data/query_results/Country_industry_emission.csv")
+
+# Define a color palette
+industry_colors <- c(
+  "Agriculture, Forestry and Fishing" = "#1f78b4",
+  "Construction" = "#33a02c",
+  "Manufacturing" = "#e31a1c",
+  "Mining" = "#ff7f00",
+  "Transportation and Storage" = "#6a3d9a"
+)
+
+# Create the ggplot
+emi <- Industry %>% 
+  filter(Country %in% c('United States', 'China', 'Japan', 'Germany', 'United Kingdom', 'India', 'France'))
+
+ggplot(emi, aes(x = Year, y = Emission/100, fill = industry)) +
+  geom_bar(stat = "identity", size = 0.1, alpha = 0.9) +
+  facet_wrap(~Country, ncol = 2, scales = "free_x") +
+  scale_x_continuous(breaks = seq(1995, 2020, by = 2)) +
+  scale_y_continuous(
+    breaks = seq(0, 5000, by = 100)
+  ) +
+  scale_fill_manual(values = industry_colors) +  # Set the color scale
+  theme_classic() +
+  labs(
+    title = "Industry Vs Country",
+    x = "Year",
+    y = "Emission",
+    caption = "International Monetary Fund - IMF"
+  ) +
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+``` 
+ 
+ 
+ 
+ 
+
+```{r Region_Vs_Gastype_Emission_lineplot, warning=FALSE,echo=FALSE}
+library(ggplot2)
+library(dplyr)
+
+Green <- read.csv("./data/query_results/emmision_gastype_region.csv")
+names(Green) = c("region" ,"gastype" ,"Year","emission")
+G2 <- Green %>% 
+  filter(emission > 10000) %>% 
+   filter(!(region %in% c('G20', 'G7','Advanced Economies','World','Emerging and Developing Economies'))) %>% 
+   filter(!(gastype %in% c('Methane'))) 
+
+ggplot(G2, aes(x = Year, y = emission, color = region)) +
+  geom_line (size=.8) + 
+  geom_point()+
+  facet_wrap(~gastype, ncol = 2) +
+  labs(
+    title = "Emission Over Years by Region",
+    x = "Year",
+    y = "Emission in Metric Tons",
+    color = "region"
+  ) +
+  theme_classic() +
+  scale_x_continuous(breaks = seq(2010, 2019, by = 1))  
+
+```
+
